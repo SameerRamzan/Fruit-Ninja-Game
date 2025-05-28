@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fruit Ninja (No Canvas)</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #f0f0f0;
+            font-family: 'Press Start 2P', cursive;
+            user-select: none;
+            overflow: hidden; /* Prevent scrollbars */
+        }
+
+        #game-container {
+            position: relative; /* For absolute positioning of elements inside */
+            width: 100%;
+            max-width: 800px; /* Adjust as needed */
+            height: 600px; /* Adjust as needed */
+            background-color: #fff;
+            border-radius: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            text-align: center;
+            overflow: hidden;
+        }
+
+        #video-feed {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover; /* Ensure video covers the entire container */
+            z-index: 1;
+        }
+
+        #score-display {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+             transform: translateX(-50%);
+            color: #fff;
+            font-size: 1.5rem;
+            z-index: 2;
+            background-color: rgba(0, 0, 0, 0.6);
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+        }
+
+        #instructions {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #fff;
+            font-size: 0.7rem;
+            z-index: 2;
+            background-color: rgba(0, 0, 0, 0.6);
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+        }
+
+        .fruit {
+            position: absolute;
+            width: 50px; /* Adjust size as needed */
+            height: 50px;
+            border-radius: 50%;
+            /* Visual styling (can be replaced with images) */
+            background-color: #ff0000;
+            /* Transition for smooth movement */
+            transition: transform 0.1s linear, top 0.1s linear;
+            z-index: 2;
+        }
+       .slice {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            background-color: rgba(255, 255, 255, 0.8); /* Semi-transparent white */
+            border-radius: 50%;
+            z-index: 3;
+            pointer-events: none;  /* Important:  slices should not interfere with clicks */
+        }
+
+        .game-over-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 4;
+            font-size: 1.5rem;
+            display: none; /* Initially hidden */
+        }
+        .game-over-content {
+          border: 4px solid #fff;
+          border-radius: 10px;
+          padding: 1rem;
+
+        }
+
+        #restart-button {
+            margin-top: 1rem;
+            padding: 0.5rem 1rem;
+            background-color: #007bff;
+            color: white;
+            font-size: 1rem;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            font-family: 'Press Start 2P', cursive;
+        }
+
+        #restart-button:hover {
+            background-color: #0056b3;
+        }
+
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <video id="video-feed" autoplay playsinline></video>
+        <div id="score-display">Score: 0</div>
+        <div id="instructions">Slice the fruits! (Use your hand)</div>
+        <div class="game-over-overlay">
+            <div class = "game-over-content">
+              <h2>Game Over</h2>
+              <p>Final Score: <span id="final-score">0</span></p>
+              <button id="restart-button">Restart</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+
+    <script>
+        const videoElement = document.getElementById('video-feed');
+        const scoreDisplay = document.getElementById('score-display');
+        const containerElement = document.getElementById('game-container');
+        const gameOverOverlay = document.querySelector('.game-over-overlay');
+        const finalScoreDisplay = document.getElementById('final-score');
+        const restartButton = document.getElementById('restart-button');
+
+        let score = 0;
+        let fruits = [];
+        let prevX, prevY;
+        let gameRunning = true;
+        let frameCount = 0; // Used to control fruit spawn rate
+        let sliceSoundEffect;
+        let gameOverSoundEffect;
+        let width, height;
+
+        // --- Setup ---
+        //MediaPipe
+        const mpHands = window.MediaPipeHands;
+        const mpDrawing = window.MediaPipeDrawing;
+        const cameraUtils = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({image: videoElement});
+            },
+            width: 800,  // Set the desired width
+            height: 600, // And the height
+        });
+        cameraUtils.start();
+
+        const hands = new mpHands.Hands({
+            static_image_mode: false,
+            max_num_hands: 1,  // Track only one hand
+            model_complexity: 1,
+            min_detection_confidence: 0.7,
+            min_tracking_confidence: 0.7,
+        });
+        hands.onResults(onResults);
+
+        function setup() {
+            // Get dimensions from the video element
+            width = videoElement.videoWidth;
+            height = videoElement.videoHeight;
+
+            // Adjust game container size, if necessary
+            containerElement.style.width = `${width}px`;
+            containerElement.style.height = `${height}px`;
+
+            //Setup of sounds
+            sliceSoundEffect = new Tone.Synth({
+                oscillator: { type: 'triangle' },
+                envelope: { attack: 0.001, decay: 0.1, sustain: 0.3, release: 0.5 }
+            }).toDestination();
+
+            gameOverSoundEffect = new Tone.MembraneSynth().toDestination();
+            Tone.start();
+        }
+
+        // --- Game Loop ---
+        function gameLoop() {
+            if (!gameRunning) return;
+            frameCount++;
+
+            // Create new fruit objects at a controlled rate
+            if (frameCount % 30 === 0) { //  adjust to control fruit spawn rate (30 frames ~= 0.5s at 60fps)
+                spawnFruit();
+            }
+
+            updateFruits();
+            drawFruits();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function spawnFruit() {
+            //const x = Math.random() * width;
+            const x = Math.random() * (width - 50) + 25; // keep fruit within bounds
+            fruits.push({
+                x: x,
+                y: 0,
+                radius: 25, // Increased size
+                color: `hsl(${Math.random() * 360}, 100%, 50%)`, // Random color
+                velocity: 3 + Math.random() * 2, // Random velocity
+                alive: true,
+                element: createFruitElement(x, 0), // Store the HTML element
+            });
+        }
+
+        function createFruitElement(x, y) {
+            const fruitElement = document.createElement('div');
+            fruitElement.classList.add('fruit');
+            fruitElement.style.left = `${x}px`;
+            fruitElement.style.top = `${y}px`;
+            fruitElement.style.backgroundColor = `hsl(${Math.random() * 360}, 100%, 50%)`;
+            containerElement.appendChild(fruitElement);
+            return fruitElement;
+        }
+
+        function updateFruits() {
+            fruits.forEach(fruit => {
+                fruit.y += fruit.velocity;
+                // Remove fruits that go off-screen
+                if (fruit.y > height + fruit.radius) {
+                    fruit.alive = false;
+                    if (fruit.element) {
+                        fruit.element.remove();
+                    }
+                }
+            });
+            fruits = fruits.filter(fruit => fruit.alive); // Remove dead fruits
+        }
+
+       function drawFruits() {
+            fruits.forEach(fruit => {
+                if (fruit.element) {
+                    fruit.element.style.left = `${fruit.x}px`;
+                    fruit.element.style.top = `${fruit.y}px`;
+                }
+            });
+        }
+
+        function onResults(results) {
+            if (!results.multi_hand_landmarks) {
+                prevX = undefined;
+                prevY = undefined;
+                return;
+            }
+
+            let currX, currY;
+            for (const handLms of results.multi_hand_landmarks) {
+                // Get the tip of the index finger (landmark 8)
+                currX = Math.round(handLms.landmark[8].x * width);
+                currY = Math.round(handLms.landmark[8].y * height);
+
+                // Draw a small circle at the fingertip
+                const sliceElement = document.createElement('div');
+                sliceElement.classList.add('slice');
+                sliceElement.style.left = `${currX}px`;
+                sliceElement.style.top = `${currY}px`;
+                containerElement.appendChild(sliceElement);
+
+                // Remove the slice element after a short delay
+                setTimeout(() => {
+                    sliceElement.remove();
+                }, 100);
+
+                // Detect swipe
+                let swipe = false;
+                if (prevX !== undefined && prevY !== undefined) {
+                    const dist = Math.hypot(currX - prevX, currY - prevY);
+                    if (dist > 40) {  // adjust this threshold
+                        swipe = true;
+                       // console.log("Swipe detected!", dist);
+                    }
+                }
+
+                // Check for fruit slice
+                if (swipe) {
+                    fruits.forEach(fruit => {
+                        if (fruit.alive && Math.hypot(currX - fruit.x, currY - fruit.y) < fruit.radius) {
+                            fruit.alive = false;
+                            score += 10;
+                            scoreDisplay.textContent = `Score: ${score}`;
+                             if (fruit.element) {
+                                fruit.element.remove();
+                            }
+                            sliceSoundEffect.triggerAttackRelease("C4", "16n");
+                        }
+                    });
+                }
+                prevX = currX;
+                prevY = currY;
+            }
+        }
+
+        function gameOver() {
+            gameRunning = false;
+            finalScoreDisplay.textContent = score;
+            gameOverOverlay.style.display = 'flex';
+            gameOverSoundEffect.triggerAttackRelease("C2", "2n");
+             // Stop the video feed
+            if (cameraUtils && cameraUtils.stream) {
+                const stream = cameraUtils.stream;
+                const tracks = stream.getTracks();
+
+                tracks.forEach(track => {
+                    track.stop();
+                });
+                cameraUtils.stream = null;
+            }
+        }
+
+
+
+        // Restart the game
+        restartButton.addEventListener('click', () => {
+            score = 0;
+            scoreDisplay.textContent = 'Score: 0';
+            fruits.forEach(fruit => {
+                if (fruit.element) {
+                    fruit.element.remove();
+                }
+            });
+            fruits = [];
+            gameRunning = true;
+            gameOverOverlay.style.display = 'none';
+            frameCount = 0;
+             // Restart the camera
+             cameraUtils.start();
+            setup();
+            gameLoop();
+        });
+
+        // --- Start the game ---
+        setup();
+        gameLoop();
+
+        // Game Over Condition (simplified -  you'd have a more complex condition in a real game)
+        setTimeout(()=> {
+            gameOver();
+        }, 30000)
+
+    </script>
+</body>
+</html>
