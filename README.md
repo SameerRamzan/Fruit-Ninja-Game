@@ -78,7 +78,3 @@ The repository provides two versions of the game:
 Contributions are welcome! If you have ideas for improvements or want to report a bug, please feel free to open an issue or submit a pull request.
 
 (Further details on contribution guidelines can be added here if the project owner has specific requirements.)
-
-## License
-
-The license for this project is not specified. Please refer to the project owner for licensing information.
